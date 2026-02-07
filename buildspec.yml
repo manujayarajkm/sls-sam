@@ -13,10 +13,12 @@ phases:
   install:
     runtime-versions:
       nodejs: 24
+      python: 3.10
     commands:
       - echo "Installing Node.js 24 + build tools"
       - npm ci
-      - npm install -g aws-sam-cli
+      - python -m pip install --upgrade pip setuptools
+      - pip install --upgrade aws-sam-cli
       - sam --version
       - npm --version
       - node --version
