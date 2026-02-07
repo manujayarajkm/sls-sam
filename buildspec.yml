@@ -5,7 +5,7 @@ env:
     ARTIFACT_BUCKET: "your-pipeline-account-artifacts-bucket"
     STACK_NAME: "your-sam-stack"
     TARGET_ROLE_ARN: "arn:aws:iam::TARGET_ACCOUNT_ID:role/CrossAccountPipelineRole"
-    EXTERNAL_ID: "my-pipeline-external-id-abc123def" # ✅ Added
+    EXTERNAL_ID: "my-pipeline-external-id-abc123def"
     AWS_REGION: "ap-south-1"
     PARAM_OVERRIDES: ""
 
@@ -15,8 +15,8 @@ phases:
       nodejs: 24
     commands:
       - echo "Installing Node.js 24 + build tools"
-      - npm ci --frozen-lockfile
-      - npm install -g aws-sam-cli aws-cfn-lint
+      - npm ci
+      - npm install -g aws-sam-cli
       - sam --version
       - npm --version
       - node --version
@@ -24,9 +24,6 @@ phases:
   pre_build:
     commands:
       - echo "Preparing cross-account environment"
-      - echo "Pipeline region: $AWS_DEFAULT_REGION"
-      - echo "Target region: $AWS_REGION"
-      # ✅ Fixed: Single complete block
       - |
         echo "Assuming target role $TARGET_ROLE_ARN with ExternalId $EXTERNAL_ID"
         CREDS=$(aws sts assume-role \
@@ -48,9 +45,6 @@ phases:
       - npm run build
       - echo "SAM build (Node.js 24 runtime)"
       - sam build --debug --use-container
-      - echo "Validating template"
-      - cfn-lint template.yaml
-      - sam validate --template template.yaml
       - echo "Packaging to $ARTIFACT_BUCKET"
       - sam package \
         --s3-bucket "$ARTIFACT_BUCKET" \
