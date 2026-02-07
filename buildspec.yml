@@ -46,6 +46,8 @@ phases:
       - echo "Building TypeScript for Node.js 24"
       - npm run build
       - echo "SAM build (Node.js 24 runtime)"
+      - echo "using bucket $ARTIFACT_BUCKET and region $AWS_DEFAULT_REGION"
+      - echo $ARTIFACT_BUCKET
       - sam build --debug --use-container
       - echo "Packaging to $ARTIFACT_BUCKET"
       - sam package \
