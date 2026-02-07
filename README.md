@@ -81,3 +81,35 @@ sam deploy --template-file packaged.yaml --stack-name my-stack --capabilities CA
 ```
 
 For detailed info see `template.yaml` and handlers under `src/handlers`.
+
+Sample cross account role trust relationship
+
+```bash
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "arn:aws:iam::<account-id>:root"
+            },
+            "Action": "sts:AssumeRole",
+            "Condition": {
+                "StringEquals": {
+                    "sts:ExternalId": "<external-id>"
+                }
+            }
+        }
+    ]
+}
+```
+
+Sample codebuild/code pipeline environment variables
+
+```bash
+    ARTIFACT_BUCKET: "sls-sam-deployment-bucket"
+    STACK_NAME: "your-sam-stack"
+    TARGET_ROLE_ARN: "arn:aws:iam::TARGET_ACCOUNT_ID:role/CrossAccountPipelineRole"
+    EXTERNAL_ID: "my-pipeline-external-id-abc123def"
+    AWS_REGION: "ap-south-1"
+```
