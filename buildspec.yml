@@ -2,15 +2,11 @@ version: 0.2
 
 env:
   variables:
-    # Required: S3 bucket in pipeline account for SAM packaging artifacts
     ARTIFACT_BUCKET: "your-pipeline-account-artifacts-bucket"
-    # Required: CloudFormation stack name to deploy
     STACK_NAME: "your-sam-stack"
-    # Required for cross-account: ARN of role in target account
     TARGET_ROLE_ARN: "arn:aws:iam::TARGET_ACCOUNT_ID:role/CrossAccountPipelineRole"
-    # Deployment region (target account region)
+    EXTERNAL_ID: "my-pipeline-external-id-abc123def" # ✅ Added
     AWS_REGION: "ap-south-1"
-    # Optional: Parameter overrides for sam deploy
     PARAM_OVERRIDES: ""
 
 phases:
@@ -30,30 +26,31 @@ phases:
       - echo "Preparing cross-account environment"
       - echo "Pipeline region: $AWS_DEFAULT_REGION"
       - echo "Target region: $AWS_REGION"
-
-      # Assume role in target account for deployment
-      # In pre_build phase, replace the assume-role command with:
+      # ✅ Fixed: Single complete block
       - |
         echo "Assuming target role $TARGET_ROLE_ARN with ExternalId $EXTERNAL_ID"
         CREDS=$(aws sts assume-role \
-        --role-arn "$TARGET_ROLE_ARN" \
-        --role-session-name "codebuild-${CODEBUILD_BUILD_NUMBER}" \
-        --external-id "$EXTERNAL_ID" \
-        --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' \
-        --output text)
+          --role-arn "$TARGET_ROLE_ARN" \
+          --role-session-name "codebuild-${CODEBUILD_BUILD_NUMBER}" \
+          --external-id "$EXTERNAL_ID" \
+          --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' \
+          --output text)
+        export AWS_ACCESS_KEY_ID=$(echo $CREDS | cut -d' ' -f1)
+        export AWS_SECRET_ACCESS_KEY=$(echo $CREDS | cut -d' ' -f2)
+        export AWS_SESSION_TOKEN=$(echo $CREDS | cut -d' ' -f3)
+        export AWS_DEFAULT_REGION="$AWS_REGION"
+        echo "Assumed role; using target account credentials"
+      - aws sts get-caller-identity --query Account --output text
 
   build:
     commands:
       - echo "Building TypeScript for Node.js 24"
       - npm run build
-
       - echo "SAM build (Node.js 24 runtime)"
       - sam build --debug --use-container
-
       - echo "Validating template"
       - cfn-lint template.yaml
       - sam validate --template template.yaml
-
       - echo "Packaging to $ARTIFACT_BUCKET"
       - sam package \
         --s3-bucket "$ARTIFACT_BUCKET" \
@@ -72,7 +69,6 @@ phases:
           --no-fail-on-empty-changeset \
           --no-confirm-changeset \
           ${PARAM_OVERRIDES:+--parameter-overrides "$PARAM_OVERRIDES"}
-          
         echo "Deployment complete. Stack: $STACK_NAME"
 
 artifacts:
