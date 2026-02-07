@@ -1,0 +1,395 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >-
+  SAM template for 4 Node.js 24 Lambdas (TypeScript). One lambda talks to S3,
+  one to DynamoDB, one publishes to SNS+SQS, one consumes SQS. Also a scheduled
+  lambda runs every 5 minutes.
+
+Globals:
+  Function:
+    Runtime: nodejs24.x
+    Timeout: 30
+    MemorySize: 256
+    Environment:
+      Variables:
+        REGION: !Ref AWS::Region
+
+Resources:
+  AppBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: my-sam-check-bucket
+
+  AppTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: user
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: name
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: name
+          KeySchema:
+            - AttributeName: name
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      BillingMode: PAY_PER_REQUEST
+
+  AppTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: my-sns
+
+  AppQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: my-sqs
+
+  QueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref AppQueue
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: Allow-SNS-SendMessage
+            Effect: Allow
+            Principal: "*"
+            Action: sqs:SendMessage
+            Resource: !GetAtt AppQueue.Arn
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !Ref AppTopic
+
+  TopicToQueueSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref AppTopic
+      Protocol: sqs
+      Endpoint: !GetAtt AppQueue.Arn
+
+  S3LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub ${AppBucket.Arn}
+                  - !Sub ${AppBucket.Arn}/*
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  AppLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: app-layer
+      Description: Shared utilities layer
+      ContentUri: src/layers
+      CompatibleRuntimes:
+        - nodejs24.x
+
+  MyApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: my-gateway
+      StageName: prod
+      DefinitionUri: api-spec.yaml
+
+  # Deployment and Stage are managed by AWS::Serverless::Api when using StageName
+
+  UploadS3Permission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt UploadS3Function.Arn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:*/*/*"
+
+  DynamoInsertPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt DynamoInsertFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:*/*/*"
+
+  DynamoGetPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt DynamoGetFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:*/*/*"
+
+  DynamoQueryPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt DynamoQueryFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:*/*/*"
+
+  DynamoDeletePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt DynamoDeleteFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:*/*/*"
+
+  PublisherPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt PublisherFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:*/*/*"
+
+  AuthFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: auth-fn
+      Handler: handlers/auth/index.handler
+      CodeUri: dist
+      Runtime: nodejs24.x
+      Timeout: 10
+
+  AuthPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt AuthFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:*/*/*"
+
+  DynamoLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: DynamoAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:GetItem
+                  - dynamodb:Query
+                Resource: !GetAtt AppTable.Arn
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  PubLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: PubAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource: !Ref AppTopic
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                Resource: !GetAtt AppQueue.Arn
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  ConsLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ConsAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource: !GetAtt AppQueue.Arn
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  ScheduledLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  UploadS3Function:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: upload-s3-fn
+      Handler: handlers/uploadS3/index.handler
+      CodeUri: dist
+      Role: !GetAtt S3LambdaRole.Arn
+      Layers:
+        - !Ref AppLayer
+      Environment:
+        Variables:
+          BUCKET: !Ref AppBucket
+
+  DynamoInsertFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: dynamo-insert-fn
+      Handler: handlers/dynamo/insert-data.handler
+      CodeUri: dist
+      Role: !GetAtt DynamoLambdaRole.Arn
+      Layers:
+        - !Ref AppLayer
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref AppTable
+
+  DynamoGetFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: dynamo-get-fn
+      Handler: handlers/dynamo/get-data.handler
+      CodeUri: dist
+      Role: !GetAtt DynamoLambdaRole.Arn
+      Layers:
+        - !Ref AppLayer
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref AppTable
+
+  DynamoQueryFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: dynamo-query-fn
+      Handler: handlers/dynamo/query-data.handler
+      CodeUri: dist
+      Role: !GetAtt DynamoLambdaRole.Arn
+      Layers:
+        - !Ref AppLayer
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref AppTable
+
+  DynamoDeleteFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: dynamo-delete-fn
+      Handler: handlers/dynamo/delete-data.handler
+      CodeUri: dist
+      Role: !GetAtt DynamoLambdaRole.Arn
+      Layers:
+        - !Ref AppLayer
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref AppTable
+
+  PublisherFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: publisher-fn
+      Handler: handlers/publisher/index.handler
+      CodeUri: dist
+      Role: !GetAtt PubLambdaRole.Arn
+      Layers:
+        - !Ref AppLayer
+      Environment:
+        Variables:
+          TOPIC_ARN: !Ref AppTopic
+          QUEUE_URL: !Ref AppQueue
+
+  ConsumerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: consumer-fn
+      Handler: handlers/consumer/index.handler
+      CodeUri: dist
+      Role: !GetAtt ConsLambdaRole.Arn
+      Layers:
+        - !Ref AppLayer
+      Events:
+        SQSEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt AppQueue.Arn
+
+  ScheduledFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: scheduled-fn
+      Handler: handlers/scheduled/index.handler
+      CodeUri: dist
+      Role: !GetAtt ScheduledLambdaRole.Arn
+      Layers:
+        - !Ref AppLayer
+      Events:
+        EveryFiveMinutes:
+          Type: Schedule
+          Properties:
+            Schedule: rate(5 minutes)
+
+Outputs:
+  BucketName:
+    Description: S3 bucket
+    Value: !Ref AppBucket
+  TableName:
+    Description: DynamoDB table
+    Value: !Ref AppTable
+  TopicArn:
+    Description: SNS topic
+    Value: !Ref AppTopic
+  QueueUrl:
+    Description: SQS queue
+    Value: !Ref AppQueue

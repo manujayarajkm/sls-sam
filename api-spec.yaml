@@ -1,0 +1,223 @@
+openapi: 3.0.1
+info:
+  title: my-gateway
+  version: "1.0"
+# Lambda authorizer definition (uses full Lambda ARN)
+components:
+  securitySchemes:
+    lambdaAuthorizer:
+      type: apiKey
+      name: Authorization
+      in: header
+      x-amazon-apigateway-authtype: custom
+      x-amazon-apigateway-authorizer:
+        type: token
+        authorizerResultTtlInSeconds: 300
+        authorizerUri: "arn:aws:apigateway:ap-southeast-2:lambda:path/2015-03-31/functions/arn:aws:lambda:ap-southeast-2:615178205919:function:auth-fn/invocations"
+        identitySource: method.request.header.Authorization
+# Authorizer will be configured on the Api resource (template.yaml) using
+# AWS::Serverless::Api Auth property. Do not define the authorizer inline here.
+paths:
+  /s3:
+    options:
+      summary: CORS preflight
+      responses:
+        "200":
+          description: OK
+          headers:
+            Access-Control-Allow-Origin:
+              schema:
+                type: string
+            Access-Control-Allow-Methods:
+              schema:
+                type: string
+            Access-Control-Allow-Headers:
+              schema:
+                type: string
+      x-amazon-apigateway-integration:
+        type: mock
+        requestTemplates:
+          application/json: '{"statusCode": 200}'
+        responses:
+          default:
+            statusCode: "200"
+            responseParameters:
+              method.response.header.Access-Control-Allow-Origin: "' * '"
+              method.response.header.Access-Control-Allow-Methods: "'GET,POST,OPTIONS,DELETE'"
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,Authorization'"
+    post:
+      security:
+        - lambdaAuthorizer: []
+      parameters:
+        - name: Content-Type
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                action:
+                  type: string
+                key:
+                  type: string
+                body:
+                  type: string
+      x-amazon-apigateway-integration:
+        uri: "arn:aws:apigateway:ap-southeast-2:lambda:path/2015-03-31/functions/arn:aws:lambda:ap-southeast-2:615178205919:function:upload-s3-fn/invocations"
+        httpMethod: POST
+        type: aws_proxy
+      responses:
+        "200":
+          description: OK
+  /s3/{key}:
+    get:
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - lambdaAuthorizer: []
+      x-amazon-apigateway-integration:
+        uri: "arn:aws:apigateway:ap-southeast-2:lambda:path/2015-03-31/functions/arn:aws:lambda:ap-southeast-2:615178205919:function:upload-s3-fn/invocations"
+        httpMethod: POST
+        type: aws_proxy
+      responses:
+        "200":
+          description: OK
+        "404":
+          description: Not Found
+  /s3/presign/{key}:
+    get:
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - lambdaAuthorizer: []
+      x-amazon-apigateway-integration:
+        uri: "arn:aws:apigateway:ap-southeast-2:lambda:path/2015-03-31/functions/arn:aws:lambda:ap-southeast-2:615178205919:function:upload-s3-fn/invocations"
+        httpMethod: POST
+        type: aws_proxy
+      responses:
+        "200":
+          description: OK
+  /dynamo:
+    options:
+      summary: CORS preflight
+      responses:
+        "200":
+          description: OK
+          headers:
+            Access-Control-Allow-Origin:
+              schema:
+                type: string
+            Access-Control-Allow-Methods:
+              schema:
+                type: string
+            Access-Control-Allow-Headers:
+              schema:
+                type: string
+      x-amazon-apigateway-integration:
+        type: mock
+        requestTemplates:
+          application/json: '{"statusCode": 200}'
+        responses:
+          default:
+            statusCode: "200"
+            responseParameters:
+              method.response.header.Access-Control-Allow-Origin: "' * '"
+              method.response.header.Access-Control-Allow-Methods: "'GET,POST,OPTIONS,DELETE'"
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,Authorization'"
+    post:
+      security:
+        - lambdaAuthorizer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      x-amazon-apigateway-integration:
+        uri: "arn:aws:apigateway:ap-southeast-2:lambda:path/2015-03-31/functions/arn:aws:lambda:ap-southeast-2:615178205919:function:dynamo-insert-fn/invocations"
+        httpMethod: POST
+        type: aws_proxy
+      responses:
+        "200":
+          description: OK
+  /dynamo/{id}:
+    get:
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - lambdaAuthorizer: []
+      x-amazon-apigateway-integration:
+        uri: "arn:aws:apigateway:ap-southeast-2:lambda:path/2015-03-31/functions/arn:aws:lambda:ap-southeast-2:615178205919:function:dynamo-get-fn/invocations"
+        httpMethod: POST
+        type: aws_proxy
+      responses:
+        "200":
+          description: OK
+    delete:
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - lambdaAuthorizer: []
+      x-amazon-apigateway-integration:
+        uri: "arn:aws:apigateway:ap-southeast-2:lambda:path/2015-03-31/functions/arn:aws:lambda:ap-southeast-2:615178205919:function:dynamo-delete-fn/invocations"
+        httpMethod: POST
+        type: aws_proxy
+      responses:
+        "200":
+          description: OK
+  /dynamo/query/{name}:
+    get:
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - lambdaAuthorizer: []
+      x-amazon-apigateway-integration:
+        uri: "arn:aws:apigateway:ap-southeast-2:lambda:path/2015-03-31/functions/arn:aws:lambda:ap-southeast-2:615178205919:function:dynamo-query-fn/invocations"
+        httpMethod: POST
+        type: aws_proxy
+      responses:
+        "200":
+          description: OK
+  /publish:
+    post:
+      security:
+        - lambdaAuthorizer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      x-amazon-apigateway-integration:
+        uri: "arn:aws:apigateway:ap-southeast-2:lambda:path/2015-03-31/functions/arn:aws:lambda:ap-southeast-2:615178205919:function:publisher-fn/invocations"
+        httpMethod: POST
+        type: aws_proxy
+      responses:
+        "200":
+          description: OK
+security: []

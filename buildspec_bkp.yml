@@ -1,0 +1,66 @@
+version: 0.2
+
+env:
+  variables:
+    # Required: S3 bucket used to store packaged artifacts (must exist)
+    ARTIFACT_BUCKET: ""
+    # Required: CloudFormation stack name to deploy
+    STACK_NAME: "my-sam-stack"
+    # Optional: role to assume in target account for cross-account deploy
+    TARGET_ROLE_ARN: ""
+    # Region for packaging/deploy (will be overridden by assumed role region if provided)
+    AWS_REGION: "ap-southeast-2"
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 24
+      python: 3.10
+    commands:
+      - echo Installing build tools
+      - npm ci
+      - python -m pip install --upgrade pip setuptools
+      - pip install --upgrade aws-sam-cli
+      - sam --version
+
+  pre_build:
+    commands:
+      - echo Preparing environment
+      - echo AWS region: $AWS_REGION
+      - |
+        if [ -n "$TARGET_ROLE_ARN" ]; then
+          echo "Assuming role $TARGET_ROLE_ARN"
+          CREDS=$(aws sts assume-role --role-arn "$TARGET_ROLE_ARN" --role-session-name codebuild-session --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' --output text)
+          export AWS_ACCESS_KEY_ID=$(echo $CREDS | awk '{print $1}')
+          export AWS_SECRET_ACCESS_KEY=$(echo $CREDS | awk '{print $2}')
+          export AWS_SESSION_TOKEN=$(echo $CREDS | awk '{print $3}')
+          echo "Assumed role; using temporary credentials"
+        else
+          echo "No TARGET_ROLE_ARN provided; using CodeBuild role credentials"
+        fi
+      - export AWS_DEFAULT_REGION=${AWS_REGION}
+
+  build:
+    commands:
+      - echo Building TypeScript
+      - npm run build
+      - echo Running sam build
+      - sam build
+      - echo validating template
+      - sam validate --template template.yaml
+      - echo Packaging to S3 bucket $ARTIFACT_BUCKET
+      - sam package --s3-bucket $ARTIFACT_BUCKET --output-template-file packaged.yaml
+
+  post_build:
+    commands:
+      - echo Deploying CloudFormation stack $STACK_NAME
+      - sam deploy --template-file packaged.yaml --stack-name $STACK_NAME --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM --region $AWS_DEFAULT_REGION --no-confirm-changeset || echo "sam deploy returned non-zero exit code"
+
+artifacts:
+  files:
+    - packaged.yaml
+    - template.yaml
+
+cache:
+  paths:
+    - node_modules/**
