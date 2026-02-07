@@ -50,10 +50,7 @@ phases:
       - echo $ARTIFACT_BUCKET
       - sam build --debug --use-container
       - echo "Packaging to $ARTIFACT_BUCKET"
-      - sam package \
-        --s3-bucket "$ARTIFACT_BUCKET" \
-        --output-template-file packaged.yaml \
-        --s3-prefix "sam-artifacts/${CODEBUILD_BUILD_NUMBER}/"
+      - sam package --s3-bucket "$ARTIFACT_BUCKET" --output-template-file packaged.yaml --s3-prefix "sam-artifacts/${CODEBUILD_BUILD_NUMBER}/" --region "$AWS_REGION"
 
   post_build:
     commands:
